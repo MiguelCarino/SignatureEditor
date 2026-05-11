@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signature Editor</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --topbar: 52px;
+      --pad: 12px;
+      --ctrl: 290px;
+      --primary: #6366f1; --primary-dim: rgba(99,102,241,0.14);
+      --bg: #0b0f1a; --card: #151d2e; --surface: #1a2235;
+      --border: rgba(255,255,255,0.07); --text: #f1f5f9; --muted: #64748b;
+      --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --info: #7dd3fc;
+      --radius: 14px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body { height: 100%; overflow: hidden; }
+
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: var(--bg); color: var(--text);
+      height: 100vh; display: flex; flex-direction: column;
+    }
+
+    /* ─── top bar ─────────────────────────────────────────────────── */
+    .topbar {
+      flex-shrink: 0; height: var(--topbar);
+      display: flex; align-items: center; gap: 14px;
+      padding: 0 20px;
+      background: rgba(21,29,46,0.95);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(8px);
+    }
+    .brand { font-size: 1rem; font-weight: 800; white-space: nowrap; }
+    .brand em { font-style: normal; color: var(--primary); }
+    #status-pill {
+      font-size: 0.68rem; font-weight: 600;
+      padding: 3px 10px; border-radius: 999px; background: #1e293b;
+      white-space: nowrap;
+    }
+    .topbar-sep { flex: 1; }
+    .btn-upload {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 16px; border-radius: 10px;
+      background: var(--primary); color: #fff;
+      font-size: 0.78rem; font-weight: 700; cursor: pointer;
+      transition: opacity 0.15s; white-space: nowrap;
+    }
+    .btn-upload:hover { opacity: 0.85; }
+    .btn-upload.disabled { opacity: 0.4; pointer-events: none; }
+
+    /* ─── content area (below topbar) ────────────────────────────── */
+    .content {
+      flex: 1; overflow: hidden;
+      padding: var(--pad);
+      display: flex; flex-direction: column;
+    }
+
+    /* ─── empty drop state ────────────────────────────────────────── */
+    .empty-state {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      border: 2px dashed #2d3f5a; border-radius: 20px;
+      background: rgba(30,41,59,0.3); cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .empty-state.drag-over {
+      border-color: var(--primary); background: var(--primary-dim);
+    }
+    .empty-inner { text-align: center; }
+    .empty-inner svg { opacity: 0.3; margin-bottom: 14px; }
+    .empty-inner p { font-size: 1.05rem; font-weight: 600; color: var(--muted); }
+    .empty-inner .sub { font-size: 0.8rem; margin-top: 5px; }
+
+    /* ─── gallery (shown when images loaded) ──────────────────────── */
+    .gallery {
+      flex: 1; overflow-y: auto; overflow-x: hidden;
+      display: flex; flex-direction: column; gap: 10px;
+      scrollbar-width: thin; scrollbar-color: #2d3f5a transparent;
+    }
+
+    /* ─── card ────────────────────────────────────────────────────── */
+    .card {
+      /* each card fills at least the full content height */
+      min-height: calc(100vh - var(--topbar) - var(--pad) * 2);
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 18px;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+
+    .card-titlebar {
+      flex-shrink: 0;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .card-titlebar .fname {
+      font-size: 0.72rem; font-weight: 700;
+      color: var(--muted); letter-spacing: 0.04em;
+      text-transform: uppercase; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; flex: 1;
+    }
+    .stat-row { display: flex; flex-wrap: wrap; gap: 5px; }
+    .badge {
+      font-size: 0.63rem; font-weight: 600; padding: 2px 8px;
+      border-radius: 999px; background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border); color: var(--muted); white-space: nowrap;
+    }
+    .badge b { color: var(--text); }
+
+    /* ─── card body: preview | controls ──────────────────────────── */
+    .card-body {
+      flex: 1; min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr var(--ctrl);
+      overflow: hidden;
+    }
+
+    /* preview side */
+    .preview-panel {
+      display: flex; flex-direction: column;
+      overflow: hidden; padding: 12px; gap: 8px;
+      border-right: 1px solid var(--border);
+    }
+    .canvas-wrapper {
+      flex: 1; min-height: 0;
+      position: relative;
+      background-color: #fff;
+      background-image:
+        linear-gradient(45deg,#dce3ed 25%,transparent 25%),
+        linear-gradient(-45deg,#dce3ed 25%,transparent 25%),
+        linear-gradient(45deg,transparent 75%,#dce3ed 75%),
+        linear-gradient(-45deg,transparent 75%,#dce3ed 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .result-canvas {
+      max-width: 100%; max-height: 100%;
+      object-fit: contain; display: block;
+      position: relative; z-index: 1;
+    }
+    .result-canvas.erasing { cursor: none; }
+    .eraser-cursor {
+      position: absolute; z-index: 2; pointer-events: none;
+      border: 1.5px solid rgba(255,255,255,0.9);
+      border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+      transform: translate(-50%, -50%);
+      display: none;
+    }
+
+    /* controls side */
+    .controls-panel {
+      overflow-y: auto; overflow-x: hidden;
+      padding: 12px; display: flex; flex-direction: column; gap: 10px;
+      scrollbar-width: thin; scrollbar-color: #2d3f5a transparent;
+    }
+
+    /* control groups */
+    .cg {
+      background: rgba(0,0,0,0.22); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 12px;
+      display: flex; flex-direction: column; gap: 9px;
+      flex-shrink: 0;
+    }
+    .cg-title {
+      font-size: 0.63rem; font-weight: 700; color: var(--muted);
+      letter-spacing: 0.07em; text-transform: uppercase;
+    }
+
+    /* sliders */
+    .sl-row { display: flex; flex-direction: column; gap: 5px; }
+    .sl-head { display: flex; justify-content: space-between; align-items: center; }
+    .sl-head label { font-size: 0.78rem; font-weight: 500; }
+    .sl-val {
+      font-size: 0.72rem; font-weight: 700; color: var(--primary);
+      background: var(--primary-dim); padding: 1px 7px;
+      border-radius: 6px; min-width: 28px; text-align: center;
+    }
+    input[type=range] { width: 100%; accent-color: var(--primary); cursor: pointer; }
+    .hint { font-size: 0.65rem; color: var(--muted); line-height: 1.4; }
+
+    /* toggle */
+    .tgl-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .tgl-row .tgl-lbl { font-size: 0.8rem; font-weight: 500; }
+    .tgl-row .tgl-sub { font-size: 0.65rem; color: var(--muted); }
+    .pill { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+    .pill input { opacity: 0; width: 0; height: 0; }
+    .pill .tr {
+      position: absolute; inset: 0; background: #2d3f5a;
+      border-radius: 999px; cursor: pointer; transition: background 0.2s;
+    }
+    .pill .tr::after {
+      content: ''; position: absolute; left: 2px; top: 2px;
+      width: 16px; height: 16px; border-radius: 50%; background: #fff;
+      transition: transform 0.2s;
+    }
+    .pill input:checked + .tr { background: var(--primary); }
+    .pill input:checked + .tr::after { transform: translateX(16px); }
+
+    /* scale radio group */
+    .scale-group { display: flex; gap: 6px; }
+    .scale-group label {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      padding: 5px 0; border-radius: 8px; cursor: pointer;
+      font-size: 0.78rem; font-weight: 700;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.04);
+      transition: border-color 0.15s, background 0.15s;
+      gap: 4px;
+    }
+    .scale-group label:has(input:checked) {
+      border-color: var(--primary); background: var(--primary-dim); color: var(--primary);
+    }
+    .scale-group input[type=radio] { display: none; }
+
+    /* buttons */
+    .btn-row { display: grid; grid-template-columns: 1fr auto; gap: 7px; }
+    .btn {
+      padding: 9px 12px; border: none; border-radius: 10px;
+      font-family: inherit; font-size: 0.78rem; font-weight: 700;
+      cursor: pointer; transition: opacity 0.15s;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { opacity: 0.88; }
+    .btn-ghost {
+      background: rgba(255,255,255,0.06); color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+    .btn-danger { background: #7f1d1d; color: #fca5a5; }
+    .btn-danger:hover { background: #991b1b; }
+    .btn-dl {
+      width: 100%; padding: 10px; border: none; border-radius: 10px;
+      background: var(--primary); color: #fff; font-weight: 700;
+      font-size: 0.82rem; cursor: pointer; font-family: inherit;
+      transition: opacity 0.15s;
+    }
+    .btn-dl:hover { opacity: 0.88; }
+
+    /* pipeline strip */
+    .pipeline-wrap {
+      flex-shrink: 0; border-top: 1px solid var(--border);
+    }
+    .pipeline-wrap details > summary {
+      font-size: 0.65rem; font-weight: 700; color: var(--muted);
+      letter-spacing: 0.06em; text-transform: uppercase;
+      list-style: none; cursor: pointer; user-select: none;
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 8px 14px;
+    }
+    .pipeline-wrap details > summary::before { content: '▶'; font-size: 0.5rem; transition: transform 0.15s; }
+    .pipeline-wrap details[open] > summary::before { transform: rotate(90deg); }
+    .pipeline {
+      display: flex; gap: 10px; overflow-x: auto;
+      padding: 0 14px 10px;
+      scrollbar-width: thin; scrollbar-color: #2d3f5a transparent;
+    }
+    .pipe-step { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .pipe-step .pipe-lbl { font-size: 0.58rem; color: var(--muted); white-space: nowrap; }
+    .pipe-step canvas { border-radius: 8px; border: 1px solid #1e293b; display: block; }
+    .pipe-dl {
+      font-size: 0.58rem; padding: 2px 7px; border: none;
+      background: rgba(255,255,255,0.06); color: var(--muted);
+      border-radius: 5px; cursor: pointer; font-family: inherit; font-weight: 600;
+    }
+    .pipe-dl:hover { background: var(--primary-dim); color: var(--text); }
+
+    /* debug details in controls */
+    details.dbg > summary {
+      font-size: 0.63rem; font-weight: 700; color: var(--muted);
+      letter-spacing: 0.06em; text-transform: uppercase;
+      list-style: none; cursor: pointer; user-select: none;
+      display: inline-flex; align-items: center; gap: 5px; padding: 2px 0;
+    }
+    details.dbg > summary::before { content: '▶'; font-size: 0.48rem; transition: transform 0.15s; }
+    details.dbg[open] > summary::before { transform: rotate(90deg); }
+    #log-head { display: flex; justify-content: space-between; align-items: center; margin: 6px 0 4px; }
+    #log-head span { font-size: 0.62rem; color: var(--muted); font-weight: 700; }
+    #log-clear {
+      font-size: 0.62rem; background: #1e293b; border: none;
+      color: var(--muted); padding: 2px 8px; border-radius: 6px; cursor: pointer;
+    }
+    #log-panel {
+      background: #020817; border: 1px solid #1e293b; border-radius: 10px;
+      padding: 10px 12px; font-family: 'Menlo','Consolas',monospace; font-size: 0.63rem;
+      max-height: 180px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+      line-height: 1.6;
+    }
+    .log-ok { color: var(--ok); } .log-warn { color: var(--warn); }
+    .log-err { color: var(--err); } .log-info { color: var(--info); }
+    .log-sep { color: #1e2d3f; }
+  </style>
+</head>
+<body>
+
+<!-- ── Top bar ──────────────────────────────────────────────────────────── -->
+<div class="topbar">
+  <span class="brand">Signature <em>Editor</em></span>
+  <div id="status-pill">⚙ Initializing…</div>
+  <div class="topbar-sep"></div>
+  <label class="btn-upload disabled" id="upload-label">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
+      <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+    </svg>
+    Upload Images
+    <input type="file" id="upload" accept="image/*" multiple hidden disabled>
+  </label>
+</div>
+
+<!-- ── Content area ─────────────────────────────────────────────────────── -->
+<div class="content" id="content">
+
+  <!-- empty state (visible before first upload) -->
+  <div class="empty-state" id="empty-state">
+    <div class="empty-inner">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <p>Drop signature images here</p>
+      <p class="sub hint">or use the Upload button above · JPG, PNG, WEBP</p>
+    </div>
+  </div>
+
+  <!-- gallery (hidden until first image) -->
+  <div class="gallery" id="gallery" style="display:none"></div>
+
+</div>
+
+<script>
+  // ── logging ──────────────────────────────────────────────────────────────
+  let logEl = null;  // set after first card is created
+
+  function log(msg, type = 'info') {
+    console.log('[SIG]', msg);
+    if (!logEl) return;
+    const s = document.createElement('span');
+    s.className = 'log-' + type;
+    s.textContent = msg + '\n';
+    logEl.appendChild(s);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function logSep(label) {
+    if (!logEl) return;
+    const s = document.createElement('span');
+    s.className = 'log-sep';
+    s.textContent = '─── ' + label + ' ───\n';
+    logEl.appendChild(s);
+  }
+
+  // ── engine boot ──────────────────────────────────────────────────────────
+  let isModuleReady = false;
+
+  function onOpenCvReady() {
+    isModuleReady = true;
+
+    const checks = [
+      'COLOR_RGBA2GRAY','COLOR_GRAY2RGBA','COLOR_GRAY_RGBA',
+      'NORM_MINMAX','ADAPTIVE_THRESH_GAUSSIAN_C',
+      'THRESH_BINARY','THRESH_BINARY_INV',
+      'RETR_EXTERNAL','CHAIN_APPROX_SIMPLE',
+    ];
+    // log only once logEl exists (first card); store for later
+    window._cvChecks = checks.map(n => ({ n, v: cv[n] }));
+
+    document.getElementById('status-pill').textContent = '✅ Ready';
+    document.getElementById('status-pill').style.background = '#065f46';
+    const inp = document.getElementById('upload');
+    inp.disabled = false;
+    document.getElementById('upload-label').classList.remove('disabled');
+  }
+
+  function dumpCvChecks() {
+    if (!window._cvChecks || !logEl) return;
+    logSep('OpenCV constants');
+    window._cvChecks.forEach(({ n, v }) => log(`cv.${n} = ${v}`, v !== undefined ? 'ok' : 'err'));
+    try { log('Build: ' + cv.getBuildInformation().split('\n')[0], 'info'); } catch(_) {}
+  }
+
+  // ── file handling ────────────────────────────────────────────────────────
+  function handleFiles(files) {
+    Array.from(files).forEach(file => {
+      log(`File: ${file.name}  ${(file.size/1024).toFixed(1)}KB`, 'info');
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const img = new Image();
+        img.onload = () => {
+          log(`Decoded: ${img.naturalWidth}×${img.naturalHeight}`, 'ok');
+          createCard(img, file.name);
+        };
+        img.onerror = () => log(`Decode error: ${file.name}`, 'err');
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  document.getElementById('upload').addEventListener('change', e => {
+    handleFiles(e.target.files);
+    e.target.value = '';
+  });
+
+  // drag-and-drop on empty state and whole content
+  const emptyState = document.getElementById('empty-state');
+  ['dragover','dragenter'].forEach(ev => {
+    document.getElementById('content').addEventListener(ev, e => {
+      e.preventDefault(); emptyState.classList.add('drag-over');
+    });
+  });
+  ['dragleave','dragend'].forEach(ev => {
+    document.getElementById('content').addEventListener(ev, () => emptyState.classList.remove('drag-over'));
+  });
+  document.getElementById('content').addEventListener('drop', e => {
+    e.preventDefault();
+    emptyState.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+  });
+  emptyState.addEventListener('click', () => document.getElementById('upload').click());
+
+  // ── Mat / pipeline helpers ───────────────────────────────────────────────
+  function matStats(mat, label) {
+    if (!mat || mat.empty()) { log(`${label}: EMPTY`, 'err'); return {}; }
+    const d = mat.data;
+    let min = 255, max = 0, sum = 0, zeros = 0, whites = 0;
+    for (let i = 0; i < d.length; i++) {
+      const v = d[i];
+      if (v < min) min = v; if (v > max) max = v; sum += v;
+      if (v === 0) zeros++; if (v === 255) whites++;
+    }
+    const mean = (sum / d.length).toFixed(1);
+    const pZ = ((zeros / d.length) * 100).toFixed(1);
+    const pW = ((whites / d.length) * 100).toFixed(1);
+    log(`${label}: ${mat.rows}×${mat.cols} ch=${mat.channels()} | min=${min} max=${max} mean=${mean} | 0%=${pZ} 255%=${pW}`, 'info');
+    return { min, max, mean, zeros, whites, total: d.length };
+  }
+
+  function snapToCanvas(mat, label, dlName, w = 130) {
+    const wrap = document.createElement('div');
+    wrap.className = 'pipe-step';
+    const lbl = document.createElement('span');
+    lbl.className = 'pipe-lbl'; lbl.textContent = label;
+    const c = document.createElement('canvas');
+    const dl = document.createElement('button');
+    dl.className = 'pipe-dl'; dl.textContent = '↓ save';
+    wrap.appendChild(lbl); wrap.appendChild(c); wrap.appendChild(dl);
+    try {
+      if (!mat || mat.empty()) {
+        c.width = w; c.height = 40;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#f87171'; ctx.fillRect(0,0,w,40);
+        ctx.fillStyle = '#fff'; ctx.font = '10px sans-serif'; ctx.fillText('EMPTY',4,24);
+      } else {
+        const scale = w / mat.cols;
+        c.width = w; c.height = Math.max(1, Math.round(mat.rows * scale));
+        cv.imshow(c, mat);
+      }
+    } catch(e) { log(`snap(${label}): ${e.message}`, 'err'); }
+    dl.onclick = () => {
+      const a = document.createElement('a');
+      a.download = `debug_${dlName}.png`;
+      a.href = c.toDataURL('image/png');
+      a.click();
+    };
+    return wrap;
+  }
+
+  function addBadge(row, label, val) {
+    const b = document.createElement('span');
+    b.className = 'badge';
+    b.innerHTML = `${label}: <b>${val}</b>`;
+    row.appendChild(b);
+  }
+
+  // ── eraser cursor SVG ────────────────────────────────────────────────────
+  function eraserCursorCSS(r) {
+    r = Math.max(4, r);
+    const d = r * 2;
+    const svg = encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}">` +
+      `<circle cx="${r}" cy="${r}" r="${r-2}" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="1.5"/>` +
+      `<circle cx="${r}" cy="${r}" r="${r-2}" fill="none" stroke="rgba(0,0,0,0.4)" stroke-width="0.7"/>` +
+      `</svg>`
+    );
+    return `url("data:image/svg+xml,${svg}") ${r} ${r}, crosshair`;
+  }
+
+  // ── download with optional upscale ──────────────────────────────────────
+  function downloadCanvas(canvas, scale, filename) {
+    scale = parseInt(scale) || 1;
+    if (scale === 1) {
+      const a = document.createElement('a');
+      a.download = filename; a.href = canvas.toDataURL('image/png'); a.click();
+      log(`Downloaded 1× (${canvas.width}×${canvas.height}px)`, 'ok');
+      return;
+    }
+    const out = document.createElement('canvas');
+    out.width  = canvas.width  * scale;
+    out.height = canvas.height * scale;
+    const ctx = out.getContext('2d');
+    ctx.imageSmoothingEnabled = false;   // nearest-neighbor keeps ink crisp
+    ctx.drawImage(canvas, 0, 0, out.width, out.height);
+    const a = document.createElement('a');
+    a.download = filename; a.href = out.toDataURL('image/png'); a.click();
+    log(`Downloaded ${scale}× (${out.width}×${out.height}px)`, 'ok');
+  }
+
+  // ── eraser setup ─────────────────────────────────────────────────────────
+  function setupEraser(canvas, wrapper, sizeSlider, toggleBtn, undoBtn) {
+    // abort any previous listener set attached to this canvas
+    if (canvas._eraserAbort) canvas._eraserAbort.abort();
+    const ac = new AbortController();
+    canvas._eraserAbort = ac;
+    const sig = { signal: ac.signal };
+
+    let active = false, drawing = false, lastX = 0, lastY = 0;
+    const undoStack = [];
+
+    // cursor overlay
+    let cursorEl = wrapper.querySelector('.eraser-cursor');
+    if (!cursorEl) {
+      cursorEl = document.createElement('div');
+      cursorEl.className = 'eraser-cursor';
+      wrapper.appendChild(cursorEl);
+    }
+
+    const updateCursorSize = () => {
+      const r = parseInt(sizeSlider.value);
+      cursorEl.style.width = r*2 + 'px';
+      cursorEl.style.height = r*2 + 'px';
+      if (active) canvas.style.cursor = eraserCursorCSS(r);
+    };
+    updateCursorSize();
+    sizeSlider.addEventListener('input', updateCursorSize);
+
+    const getPos = e => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width  / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const cx = e.touches ? e.touches[0].clientX : e.clientX;
+      const cy = e.touches ? e.touches[0].clientY : e.clientY;
+      const wr = wrapper.getBoundingClientRect();
+      return {
+        x: (cx - rect.left) * scaleX,
+        y: (cy - rect.top)  * scaleY,
+        px: cx - wr.left, py: cy - wr.top,
+      };
+    };
+
+    const saveState = () => {
+      const ctx = canvas.getContext('2d');
+      undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+      if (undoStack.length > 20) undoStack.shift();
+    };
+
+    const erase = (x, y) => {
+      const r = parseInt(sizeSlider.value);
+      const ctx = canvas.getContext('2d');
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(x, y);
+      ctx.lineWidth = r * 2;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      ctx.restore();
+      lastX = x; lastY = y;
+    };
+
+    canvas.addEventListener('mousedown', e => {
+      if (!active) return; e.preventDefault();
+      saveState(); drawing = true;
+      const p = getPos(e); lastX = p.x; lastY = p.y; erase(p.x, p.y);
+    }, sig);
+    canvas.addEventListener('mousemove', e => {
+      if (!active) return;
+      const p = getPos(e);
+      cursorEl.style.left = p.px + 'px';
+      cursorEl.style.top  = p.py + 'px';
+      if (drawing) erase(p.x, p.y);
+    }, sig);
+    canvas.addEventListener('mouseup',    () => { drawing = false; }, sig);
+    canvas.addEventListener('mouseleave', () => { drawing = false; cursorEl.style.display = 'none'; }, sig);
+    canvas.addEventListener('mouseenter', () => { if (active) cursorEl.style.display = 'block'; }, sig);
+
+    canvas.addEventListener('touchstart', e => {
+      if (!active) return; e.preventDefault();
+      saveState(); drawing = true;
+      const p = getPos(e); lastX = p.x; lastY = p.y; erase(p.x, p.y);
+    }, { passive: false, signal: ac.signal });
+    canvas.addEventListener('touchmove', e => {
+      if (!active || !drawing) return; e.preventDefault();
+      const p = getPos(e); erase(p.x, p.y);
+    }, { passive: false, signal: ac.signal });
+    canvas.addEventListener('touchend', () => { drawing = false; }, sig);
+
+    toggleBtn.onclick = () => {
+      active = !active;
+      if (active) {
+        toggleBtn.textContent = '✕ Stop Erasing';
+        toggleBtn.classList.remove('btn-ghost'); toggleBtn.classList.add('btn-danger');
+        canvas.classList.add('erasing');
+        updateCursorSize();
+        cursorEl.style.display = 'block';
+      } else {
+        toggleBtn.textContent = '✎  Eraser';
+        toggleBtn.classList.remove('btn-danger'); toggleBtn.classList.add('btn-ghost');
+        canvas.classList.remove('erasing');
+        canvas.style.cursor = '';
+        cursorEl.style.display = 'none';
+      }
+    };
+
+    undoBtn.onclick = () => {
+      if (!undoStack.length) { log('Nothing to undo', 'warn'); return; }
+      canvas.getContext('2d').putImageData(undoStack.pop(), 0, 0);
+      log('Undo', 'ok');
+    };
+
+  }
+
+  // ── card creation ─────────────────────────────────────────────────────────
+  function createCard(img, filename) {
+    // show gallery, hide empty state
+    document.getElementById('empty-state').style.display = 'none';
+    document.getElementById('gallery').style.display = 'flex';
+
+    const id = 'c' + Date.now();
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="card-titlebar">
+        <span class="fname">${filename}</span>
+        <div class="stat-row" id="stats-${id}"></div>
+      </div>
+
+      <div class="card-body">
+
+        <!-- preview -->
+        <div class="preview-panel">
+          <div class="canvas-wrapper" id="wrap-${id}">
+            <canvas class="result-canvas" id="canvas-${id}"></canvas>
+          </div>
+        </div>
+
+        <!-- controls -->
+        <div class="controls-panel">
+
+          <div class="cg">
+            <div class="cg-title">Threshold</div>
+            <div class="sl-row">
+              <div class="sl-head">
+                <label>Sensitivity (C)</label>
+                <span class="sl-val" id="sv-${id}">20</span>
+              </div>
+              <input type="range" min="2" max="100" value="20" id="sens-${id}">
+              <span class="hint">Higher = more background removed</span>
+            </div>
+          </div>
+
+          <div class="cg">
+            <div class="cg-title">Options</div>
+            <div class="tgl-row">
+              <div>
+                <div class="tgl-lbl">Invert colors</div>
+                <div class="tgl-sub">Light ink on dark paper</div>
+              </div>
+              <label class="pill">
+                <input type="checkbox" id="inv-${id}">
+                <span class="tr"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="cg">
+            <div class="cg-title">Eraser</div>
+            <div class="sl-row">
+              <div class="sl-head">
+                <label>Brush size</label>
+                <span class="sl-val" id="esv-${id}">20</span>
+              </div>
+              <input type="range" min="4" max="120" value="20" id="esize-${id}">
+              <span class="hint">Paint on the preview to erase. Re-process resets.</span>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-ghost" id="etgl-${id}">✎  Eraser</button>
+              <button class="btn btn-ghost" id="eundo-${id}">↩</button>
+            </div>
+          </div>
+
+          <div class="cg">
+            <div class="cg-title">Export</div>
+            <div class="sl-row">
+              <div class="sl-head"><label>Upscale</label></div>
+              <div class="scale-group" id="scale-${id}">
+                <label><input type="radio" name="scale-${id}" value="1" checked>1×</label>
+                <label><input type="radio" name="scale-${id}" value="2">2×</label>
+                <label><input type="radio" name="scale-${id}" value="4">4×</label>
+              </div>
+              <span class="hint">2× and 4× use nearest-neighbour upscaling (crisp edges). Applied at download only.</span>
+            </div>
+            <button class="btn-dl" id="dl-${id}">↓ Download PNG</button>
+          </div>
+
+          <details class="dbg">
+            <summary>Debug log</summary>
+            <div id="log-head">
+              <span>ENGINE LOG</span>
+              <button id="log-clear">Clear</button>
+            </div>
+            <div id="log-panel"><span class="log-info">Engine log will appear here.</span>
+</div>
+          </details>
+
+        </div><!-- /controls-panel -->
+      </div><!-- /card-body -->
+
+      <div class="pipeline-wrap">
+        <details>
+          <summary>Pipeline debug</summary>
+          <div class="pipeline" id="pipe-${id}"></div>
+        </details>
+      </div>
+    `;
+
+    document.getElementById('gallery').prepend(card);
+
+    // wire up logEl now that first card exists
+    if (!logEl) {
+      logEl = document.getElementById('log-panel');
+      document.getElementById('log-clear').onclick = () => { logEl.innerHTML = ''; };
+      dumpCvChecks();
+    }
+
+    let resultCanvas  = card.querySelector('.result-canvas');
+    const wrapper     = card.querySelector('.canvas-wrapper');
+    const sensSlider  = card.querySelector(`#sens-${id}`);
+    const sensVal     = card.querySelector(`#sv-${id}`);
+    const invertChk   = card.querySelector(`#inv-${id}`);
+    const eraserSize  = card.querySelector(`#esize-${id}`);
+    const eraserSzVal = card.querySelector(`#esv-${id}`);
+    const eraserToggle= card.querySelector(`#etgl-${id}`);
+    const eraserUndo  = card.querySelector(`#eundo-${id}`);
+    const dlBtn       = card.querySelector(`#dl-${id}`);
+    const pipelineEl  = card.querySelector(`#pipe-${id}`);
+    const statsEl     = card.querySelector(`#stats-${id}`);
+    const scaleGroup  = card.querySelector(`#scale-${id}`);
+
+    eraserSize.oninput = () => { eraserSzVal.textContent = eraserSize.value; };
+
+    const update = () => {
+      sensVal.textContent = sensSlider.value;
+      pipelineEl.innerHTML = '';
+      statsEl.innerHTML = '';
+      // reset eraser state label
+      eraserToggle.textContent = '✎  Eraser';
+      eraserToggle.classList.remove('btn-danger'); eraserToggle.classList.add('btn-ghost');
+
+      processImage(img, resultCanvas, parseInt(sensSlider.value), invertChk.checked, pipelineEl, statsEl, filename, id);
+
+      // wire eraser listeners onto the same canvas (no cloning — content must be preserved)
+      setupEraser(resultCanvas, wrapper, eraserSize, eraserToggle, eraserUndo);
+    };
+
+    sensSlider.oninput = update;
+    invertChk.onchange = update;
+
+    dlBtn.onclick = () => {
+      const scale = scaleGroup.querySelector('input:checked')?.value || '1';
+      const base  = filename.replace(/\.[^.]+$/, '');
+      downloadCanvas(resultCanvas, scale, `Signature_${base}.png`);
+    };
+
+    update();
+  }
+
+  // ── main processing ──────────────────────────────────────────────────────
+  function processImage(img, canvas, sensitivity, invert, pipelineEl, statsEl, filename, id) {
+    if (!isModuleReady) { log('Engine not ready', 'err'); return; }
+    logSep(`${filename}  C=${sensitivity}  inv=${invert}`);
+
+    const mats = [];
+    const mk = name => { const m = new cv.Mat(); mats.push({ m, name }); return m; };
+    const cleanup = () => mats.forEach(({ m, name }) => {
+      try { if (!m.isDeleted()) m.delete(); } catch(e) { log(`cleanup ${name}: ${e.message}`, 'warn'); }
+    });
+    let contours = null;
+
+    try {
+
+      // STEP 0: imread
+      log('STEP 0: imread', 'info');
+      let src;
+      try {
+        src = cv.imread(img);
+        mats.push({ m: src, name: 'src' });
+        log(`  ${src.rows}×${src.cols} ch=${src.channels()} empty=${src.empty()}`, src.empty() ? 'err' : 'ok');
+        if (src.empty()) throw new Error('imread empty');
+        addBadge(statsEl, 'in', `${src.cols}×${src.rows}`);
+        pipelineEl.appendChild(snapToCanvas(src, '0·src', 'step0_src'));
+      } catch(e) { log(`STEP 0 FAILED: ${e.message}`, 'err'); return; }
+
+      // STEP 1: grayscale
+      log(`STEP 1: cvtColor RGBA→GRAY  cv.COLOR_RGBA2GRAY=${cv.COLOR_RGBA2GRAY}`, 'info');
+      let gray = mk('gray');
+      try {
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+        const s = matStats(gray, '  gray');
+        addBadge(statsEl, 'gray', `${s.min}–${s.max}`);
+        pipelineEl.appendChild(snapToCanvas(gray, '1·gray', 'step1_gray'));
+        log('  OK', 'ok');
+      } catch(e) { log(`STEP 1 FAILED: ${e.message}`, 'err'); return; }
+
+      // STEP 2: normalize
+      log(`STEP 2: normalize  NORM_MINMAX=${cv.NORM_MINMAX}`, 'info');
+      let norm = mk('norm');
+      try {
+        cv.normalize(gray, norm, 0, 255, cv.NORM_MINMAX);
+        matStats(norm, '  norm');
+        pipelineEl.appendChild(snapToCanvas(norm, '2·norm', 'step2_norm'));
+        log('  OK', 'ok');
+      } catch(e) { log(`STEP 2 FAILED: ${e.message}`, 'err'); return; }
+
+      // STEP 3: blur
+      log('STEP 3: GaussianBlur 3×3', 'info');
+      let blur = mk('blur');
+      try {
+        cv.GaussianBlur(norm, blur, new cv.Size(3, 3), 0);
+        matStats(blur, '  blur');
+        pipelineEl.appendChild(snapToCanvas(blur, '3·blur', 'step3_blur'));
+        log('  OK', 'ok');
+      } catch(e) { log(`STEP 3 FAILED: ${e.message}`, 'err'); return; }
+
+      // STEP 4: adaptive threshold
+      let blockSize = Math.max(15, Math.floor(Math.min(src.rows, src.cols) / 40));
+      if (blockSize % 2 === 0) blockSize++;
+      const thType = invert ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY;
+      log(`STEP 4: adaptiveThreshold  block=${blockSize}  C=${sensitivity}  type=${invert?'INV':'BINARY'}`, 'info');
+      log(`  ADAPTIVE_THRESH_GAUSSIAN_C=${cv.ADAPTIVE_THRESH_GAUSSIAN_C}  THRESH_BINARY=${cv.THRESH_BINARY}  THRESH_BINARY_INV=${cv.THRESH_BINARY_INV}`, 'info');
+      let thresh = mk('thresh');
+      try {
+        cv.adaptiveThreshold(blur, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, thType, blockSize, sensitivity);
+        const s = matStats(thresh, '  thresh');
+        addBadge(statsEl, 'block', blockSize);
+        addBadge(statsEl, 'ink%', ((s.zeros / s.total) * 100).toFixed(1) + '%');
+        pipelineEl.appendChild(snapToCanvas(thresh, '4·thresh', 'step4_thresh'));
+        log('  OK', 'ok');
+      } catch(e) { log(`STEP 4 FAILED: ${e.message}`, 'err'); return; }
+
+      // STEP 5: cvtColor → RGBA
+      log(`STEP 5: cvtColor GRAY→RGBA  COLOR_GRAY2RGBA=${cv.COLOR_GRAY2RGBA}  COLOR_GRAY_RGBA=${cv.COLOR_GRAY_RGBA}`, 'info');
+      let rgba = mk('rgba');
+      try {
+        cv.cvtColor(thresh, rgba, cv.COLOR_GRAY2RGBA, 0);
+        log(`  ${rgba.rows}×${rgba.cols} ch=${rgba.channels()}`, 'info');
+        log('  OK', 'ok');
+      } catch(e) { log(`STEP 5 FAILED: ${e.message}`, 'err'); return; }
+
+      // STEP 6: pixel loop
+      log('STEP 6: pixel loop  white→transparent  dark→black', 'info');
+      let madeTrans = 0, madeBlack = 0;
+      try {
+        const data = rgba.data, total = data.length / 4;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i] > 200 && data[i+1] > 200 && data[i+2] > 200) {
+            data[i+3] = 0; madeTrans++;
+          } else {
+            data[i] = 0; data[i+1] = 0; data[i+2] = 0; data[i+3] = 255; madeBlack++;
+          }
+        }
+        const pT = ((madeTrans/total)*100).toFixed(1);
+        const pB = ((madeBlack/total)*100).toFixed(1);
+        log(`  transparent=${pT}%  black=${pB}%  total=${total}px`, madeTrans===total?'err':'ok');
+        addBadge(statsEl, 'bg%', pT+'%');
+        addBadge(statsEl, 'ink px', pB+'%');
+        if (madeTrans === total) log('  ⚠ ALL transparent – ink not detected!', 'err');
+        if (madeBlack === total) log('  ⚠ ALL black – BG not removed!', 'err');
+        pipelineEl.appendChild(snapToCanvas(rgba, '5·rgba', 'step5_rgba'));
+        log('  OK', 'ok');
+      } catch(e) { log(`STEP 6 FAILED: ${e.message}`, 'err'); return; }
+
+      // STEP 7: find contours
+      log('STEP 7: bitwise_not + findContours', 'info');
+      let inv = mk('inv'), hier = mk('hier');
+      contours = new cv.MatVector();
+      try {
+        cv.bitwise_not(thresh, inv);
+        pipelineEl.appendChild(snapToCanvas(inv, '6·inv', 'step6_inv'));
+        cv.findContours(inv, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+        log(`  contours: ${contours.size()}`, contours.size()===0?'warn':'ok');
+        addBadge(statsEl, 'ctrs', contours.size());
+        log('  OK', 'ok');
+      } catch(e) { log(`STEP 7 FAILED: ${e.message}`, 'err'); }
+
+      // STEP 8: tight crop
+      log('STEP 8: bounding box  pad=2px', 'info');
+      const PAD = 2;
+      let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
+      if (contours && contours.size() > 0) {
+        for (let i = 0; i < contours.size(); i++) {
+          const r = cv.boundingRect(contours.get(i));
+          if (r.width * r.height > 50) {
+            minX = Math.min(minX, r.x); minY = Math.min(minY, r.y);
+            maxX = Math.max(maxX, r.x+r.width); maxY = Math.max(maxY, r.y+r.height);
+          }
+        }
+        if (minX !== Infinity)
+          log(`  bbox: x=${minX} y=${minY} w=${maxX-minX} h=${maxY-minY}`, 'info');
+        else
+          log('  no significant contours', 'warn');
+      }
+
+      // STEP 9: imshow
+      log('STEP 9: imshow', 'info');
+      try {
+        if (minX !== Infinity && maxX > minX && maxY > minY) {
+          const cx = Math.max(0, minX-PAD), cy = Math.max(0, minY-PAD);
+          const cw = Math.min(rgba.cols, maxX+PAD) - cx;
+          const ch = Math.min(rgba.rows, maxY+PAD) - cy;
+          log(`  crop x=${cx} y=${cy} w=${cw} h=${ch}`, 'info');
+          if (cw > 0 && ch > 0) {
+            const cropped = rgba.roi(new cv.Rect(cx, cy, cw, ch));
+            cv.imshow(canvas, cropped);
+            addBadge(statsEl, 'out', `${cw}×${ch}`);
+            pipelineEl.appendChild(snapToCanvas(cropped, '7·crop', 'step7_crop'));
+            cropped.delete();
+            log('  imshow (cropped) OK', 'ok');
+          } else {
+            log('  invalid crop – full fallback', 'warn'); cv.imshow(canvas, rgba);
+          }
+        } else {
+          log('  no crop – full image', 'warn'); cv.imshow(canvas, rgba);
+        }
+      } catch(e) { log(`STEP 9 FAILED: ${e.message}`, 'err'); }
+
+      log('Done.', 'ok');
+
+    } catch(e) {
+      log(`Unhandled: ${e.message}\n${e.stack}`, 'err');
+    } finally {
+      try { if (contours) contours.delete(); } catch(e) { log(`contours.delete: ${e.message}`, 'warn'); }
+      cleanup();
+    }
+  }
+</script>
+
+<script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady()"></script>
+</body>
+</html>
